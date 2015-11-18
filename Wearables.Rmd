@@ -1,0 +1,130 @@
+---
+title: "Excercise - Wearables"
+author: "Luis F Botero"
+date: "October 23, 2015"
+output: pdf_document
+---
+
+Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+```{r}
+library(caret)
+library(doParallel)
+library(rattle)
+library(RGtk2)
+library(randomForest)
+library(ggplot2)
+
+#setwd(".\\Data_science\\Machine Learning\\Project")
+## Original Training Set
+training<-read.csv("pml-training.csv", header = TRUE,na.strings=c("DIV/0!"))
+testing<-read.csv("pml-testing.csv", header = TRUE,na.strings=c("DIV/0!"))
+
+# To ensure repetibility
+set.seed(100)
+
+```
+Exploratory Analysis
+
+
+Just to get an idea, a few simple plots showing relationships between variables
+```{r}
+str(training[,1:20])
+selected_columns<-c(2:8,160)
+pairs(training[,selected_columns])
+
+```
+From this pairs plot we can select some variables that are not randomly distributed, can be taken out of the model:  timestamp, new windows, user name
+
+
+
+Split Training and Validation sets
+
+```{r}
+inTrain = createDataPartition(training$classe, p = .6)[[1]]
+training = training[ inTrain,]
+validation = training[-inTrain,]
+```
+
+Preprocessing
+
+```{r}
+## Simplified discarding Near Zero Variability vars
+NSV<-nearZeroVar(training)
+training <- training[,-NSV]
+
+# Eliminate first columns that are irrelevant to the prediction: timestamp,new windows,.
+IR_COL<-grep("^user|timestamp|window",names(training))
+training<-training[,-IR_COL]
+```
+Then we check for correlated columns and take them out to simplify the model
+
+```{r}
+#Correlated variables
+correlated_columns<-findCorrelation(cor(training[,-ncol(training)]),cutoff=.9,names=FALSE,exact=TRUE)
+colnames(training)[correlated_columns]
+training<-training[,-correlated_columns]
+```
+
+
+Model creation
+```{r}
+# Use parallel to speed up calculations
+registerDoParallel()
+starting_time<-Sys.time()
+model<-train(classe~.,data=training,method="rf",preProcess="pca",tuneGrid=data.frame(mtry=2))
+ending_time<-Sys.time()
+```
+Model's calculation time
+```{r}
+# I added it since it was taking so long without the Parallel, wanted to compare
+print(ending_time-starting_time)
+
+```
+The Random Forest method enables to calculate error and accuracy without a testing or cross validation set. Below the Accuracy and calculated error rate
+
+Accuracy
+```{r}
+print(model$results)
+```
+Error Rate
+```{r}
+print(model$finalModel)
+```
+
+Prediction out of training matriz
+
+```{r}
+predict_training<-predict(model,training)
+confusionMatrix(predict_training,training$classe)
+```
+Cross Validation
+
+```{r}
+validation<-validation[,-NSV]
+validation<-validation[,-IR_COL]
+validation<-validation[,-correlated_columns]
+predict_validation <-predict(model,newdata=validation)
+confusionMatrix(predict_validation,validation$classe)
+```
+
+Now using the testing vector write the testing files 
+
+```{r}
+predict_testing<-predict(model,newdata=testing)
+predict_testing
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+# Write files for the course testing
+pml_write_files( as.character(predict_testing))
+```
+
+
